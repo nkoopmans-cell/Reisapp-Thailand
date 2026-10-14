@@ -954,6 +954,13 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
 .gate-box { max-width: 380px; display: grid; gap: 14px; text-align: center; justify-items: center; }
 .gate-box .btn { font-size: 15px; padding: 10px 18px; }
 .gate-msg { color: var(--danger); font-size: 14px; margin: 0; }
+.gate-form { display: grid; gap: 8px; width: min(300px, 100%); text-align: left; }
+.gate-form input { width: 100%; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 10px 12px; font: inherit; color: var(--ink); }
+.gate-lbl { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.gate-form .btn.primary { justify-content: center; margin-top: 4px; }
+.gate-form .btn.ghost { justify-content: center; color: var(--muted); }
+.gate-or { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+#gateEmailWrap { display: grid; gap: 6px; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .leaflet-tile-pane { filter: brightness(.72) contrast(1.08) saturate(.85); } }
 :root[data-theme="dark"] .leaflet-tile-pane { filter: brightness(.72) contrast(1.08) saturate(.85); }
 </style>
@@ -1000,9 +1007,17 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
   <div class="gate-box">
     <div class="eyebrow" style="justify-content:center">Rondreis · Thailand</div>
     <h1>Thailand met de tieners</h1>
-    <p class="sub">Log in met je Google-account om de reis te bekijken en samen aan te passen.</p>
-    <button type="button" class="btn primary" id="gateLogin">Inloggen met Google</button>
-    <button type="button" class="btn" id="gateSwitch" hidden>Ander account kiezen</button>
+    <p class="sub">Vul het wachtwoord van de reis in om de planning te bekijken en samen aan te passen.</p>
+    <form id="gatePwForm" class="gate-form" autocomplete="on">
+      <div id="gateEmailWrap" hidden><label for="gateEmail" class="gate-lbl">E-mailadres</label><input type="email" id="gateEmail" autocomplete="username" placeholder="je@voorbeeld.nl"></div>
+      <label for="gatePw" class="gate-lbl">Wachtwoord</label>
+      <input type="password" id="gatePw" autocomplete="current-password" required>
+      <button type="submit" class="btn primary" id="gatePwBtn">Inloggen</button>
+      <button type="button" class="btn ghost sm" id="gateOwn">Inloggen met eigen e-mailadres</button>
+    </form>
+    <div class="gate-or">of</div>
+    <button type="button" class="btn" id="gateLogin">Inloggen met Google</button>
+    <button type="button" class="btn" id="gateSwitch" hidden>Opnieuw inloggen</button>
     <p class="gate-msg" id="gateMsg" hidden></p>
   </div>
 </div>
@@ -1060,6 +1075,7 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
     measurementId: 'G-WDFPZ3K38H',
   };
   const TRIP = 'thailand-2027';
+  const SHARED_EMAIL = 'familie@thailand-reis.app'; // shared trip account (e-mail + password), created in Firebase → Authentication → Users
   const COLS = ['days', 'places', 'legs', 'trip'];
   const SEED = null;
 
@@ -1136,6 +1152,7 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
     $('#gateMsg').textContent = msg || '';
     $('#gateMsg').hidden = !msg;
     $('#gateLogin').hidden = !!allowSwitch;
+    $('#gatePwForm').hidden = !!allowSwitch;
     $('#gateSwitch').hidden = !allowSwitch;
   }
   const authMsg = (e) => {
@@ -1143,6 +1160,10 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
     if (c === 'auth/unauthorized-domain' || c === 'auth/operation-not-supported-in-this-environment') return location.protocol === 'file:' ? 'Inloggen werkt niet vanuit een los bestand. Open de app via het webadres (bijv. je Netlify-link).' : `Dit webadres is nog niet toegestaan. Voeg "${location.hostname}" toe in Firebase → Authentication → Settings → Authorized domains.`;
     if (c === 'auth/popup-closed-by-user' || c === 'auth/cancelled-popup-request') return '';
     if (c === 'auth/network-request-failed') return 'Geen internetverbinding. Probeer het opnieuw zodra je online bent.';
+    if (c === 'auth/invalid-credential' || c === 'auth/wrong-password' || c === 'auth/user-not-found' || c === 'auth/invalid-login-credentials') return 'Wachtwoord klopt niet.';
+    if (c === 'auth/too-many-requests') return 'Te vaak geprobeerd. Wacht een paar minuten.';
+    if (c === 'auth/operation-not-allowed') return 'Inloggen met wachtwoord staat nog niet aan in Firebase (Authentication → Sign-in method → Email/Password).';
+    if (c === 'auth/invalid-email') return 'Dat e-mailadres klopt niet.';
     return 'Inloggen lukte niet' + (c ? ` (${c})` : '') + '.';
   };
   async function login() {
@@ -1153,6 +1174,15 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
       if (e && (e.code === 'auth/popup-blocked' || e.code === 'auth/web-storage-unsupported')) { try { await auth.signInWithRedirect(p); return; } catch (e2) { e = e2; } }
       const m = authMsg(e); if (m) gate(true, m, false);
     }
+  }
+  async function loginPw(e) {
+    e && e.preventDefault();
+    const pw = $('#gatePw').value; const em = ($('#gateEmail').value || '').trim() || SHARED_EMAIL;
+    if (!pw) { gate(true, 'Vul het wachtwoord in.', false); return; }
+    $('#gatePwBtn').disabled = true;
+    try { await auth.signInWithEmailAndPassword(em, pw); $('#gatePw').value = ''; }
+    catch (err) { const m = authMsg(err); if (m) gate(true, m, false); }
+    $('#gatePwBtn').disabled = false;
   }
   auth.getRedirectResult().catch((e) => { const m = authMsg(e); if (m) gate(true, m, false); });
 
@@ -1181,7 +1211,9 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
   }
   document.addEventListener('DOMContentLoaded', () => {
     $('#gateLogin').addEventListener('click', login);
-    $('#gateSwitch').addEventListener('click', async () => { await auth.signOut(); login(); });
+    $('#gatePwForm').addEventListener('submit', loginPw);
+    $('#gateOwn').addEventListener('click', () => { $('#gateEmailWrap').hidden = false; $('#gateOwn').hidden = true; $('#gateEmail').focus(); });
+    $('#gateSwitch').addEventListener('click', async () => { await auth.signOut(); gate(true, '', false); });
     $('#saLogout').addEventListener('click', async () => { await auth.signOut(); location.reload(); });
   });
 

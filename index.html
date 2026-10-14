@@ -825,6 +825,19 @@ h3 { font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase; color:
 .ag-empty { color: var(--muted); font-size: 14px; padding: 8px 0 8px 94px; }
 .ag-extra { padding: 2px 0 4px 86px; }
 .ag-confirm { margin: 4px 0; }
+.status-entry { width: 100%; text-align: left; font: inherit; color: inherit; }
+.status-entry .row { align-items: center; }
+.st-list { display: grid; gap: 2px; }
+.st-day { font-size: 11.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 12px 0 4px; border-bottom: 1px solid var(--line); margin-bottom: 2px; }
+.st-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; margin-inline: -8px; border-radius: 8px; cursor: pointer; }
+.st-row:hover { background: var(--soft); }
+.st-row input { width: 18px; height: 18px; accent-color: var(--slow); flex: none; }
+.st-row .ico { width: 28px; height: 28px; }
+.st-row .ico svg.i { width: 15px; height: 15px; }
+.st-body { display: grid; min-width: 0; }
+.st-kind { font-size: 11.5px; color: var(--muted); font-weight: 600; }
+.st-title { font-size: 14.5px; font-weight: 600; overflow-wrap: anywhere; }
+.st-row:not(.on) .st-title { color: var(--muted); font-weight: 500; }
 .todo { display: grid; gap: 2px; }
 .todo-row { display: flex; gap: 10px; align-items: flex-start; padding: 6px 8px; margin-inline: -8px; border-radius: 8px; cursor: pointer; font-size: 14.5px; }
 .todo-row:hover { background: var(--soft); }
@@ -989,6 +1002,7 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
         <div class="menu-who" id="saWho"></div>
         <button type="button" role="menuitem" id="xlExport">Excel exporteren</button>
         <label role="menuitem" for="xlFile">Excel importeren</label><input type="file" id="xlFile" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+        <button type="button" role="menuitem" id="menuStatus">Bevestigingen</button>
         <button type="button" role="menuitem" id="menuTrip">Reisgegevens bewerken</button>
         <div class="menu-sep"></div>
         <button type="button" role="menuitem" id="saExport">Back-up maken</button>
@@ -1353,7 +1367,8 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
     const rows = [PLAN.map((c) => c[1])];
     const items = [];
     const T = (t, fb) => { const m = /(\d{1,2})[:.](\d{2})/.exec(t || ''); if (m) return +m[1] + +m[2] / 60; const l = String(t || '').toLowerCase(); for (const [w, v] of [['vroeg', 6.5], ['ontbijt', 8], ['hele dag', 9.5], ['ochtend', 9], ['lunch', 12.5], ['middag', 14], ['diner', 19], ['avond', 19.5], ['nacht', 22]]) if (l.includes(w)) return v; return fb; };
-    for (const [id, l] of Object.entries(data.legs || {})) items.push({ id, day: l.day || 0, key: T(l.dep, 8) + (l.order || 0) * 0.001, r: { kind: 'Vervoer', start: l.dep, end: l.arr, name: MODE_LABEL[l.mode] || '', mode: MODE_LABEL[l.mode] || '', from: endName(data, l.from), to: endName(data, l.to), booking: l.booking, carrier: l.carrier, duration: l.duration, notes: l.notes } });
+    const LK = {}; { const byDay = {}; for (const [id, l] of Object.entries(data.legs || {})) (byDay[l.day || 0] = byDay[l.day || 0] || []).push([id, l]); for (const list of Object.values(byDay)) { list.sort((a, b) => (a[1].order ?? 0) - (b[1].order ?? 0)); let prev = null; for (const [id, l] of list) { const k = l.dep ? T(l.dep, 8) : l.arr ? T(l.arr, 8) - 0.5 : prev != null ? prev + 0.01 : 8; LK[id] = k; prev = k; } } }
+    for (const [id, l] of Object.entries(data.legs || {})) items.push({ id, day: l.day || 0, key: LK[id] + (l.order || 0) * 0.0001, r: { kind: 'Vervoer', status: l.confirmed === true ? 'bevestigd' : 'voorstel', start: l.dep, end: l.arr, name: MODE_LABEL[l.mode] || '', mode: MODE_LABEL[l.mode] || '', from: endName(data, l.from), to: endName(data, l.to), booking: l.booking, carrier: l.carrier, duration: l.duration, notes: l.notes } });
     for (const [id, p] of Object.entries(data.places || {})) {
       if (p.type === 'activity' || p.type === 'restaurant') items.push({ id, day: p.day || 0, key: T(p.time, p.type === 'restaurant' ? 19 : 13) + (p.order || 0) * 0.0001, r: { kind: KIND_TXT[p.type], status: p.confirmed === false ? 'voorstel' : 'bevestigd', start: p.time, end: p.endTime, name: p.name, place: p.region, address: p.address, desc: p.desc, booking: p.booking, price: p.price, phone: p.phone, cuisine: p.cuisine, url: p.url, maps: ownMaps(p), lat: num(p.lat), lng: num(p.lng), notes: p.notes } });
       if (p.type === 'hotel') items.push({ id, day: p.from || 0, key: 30 + (p.chosen ? 0 : 0.1), r: { kind: 'Hotel', status: p.chosen ? 'bevestigd' : 'voorstel', start: p.checkin, end: p.checkout, name: p.name, place: p.stayName, lastNight: p.to ?? p.from, address: p.address, desc: p.desc, booking: p.booking, price: p.price, phone: p.phone, room: p.room, url: p.url, maps: ownMaps(p), lat: num(p.lat), lng: num(p.lng), notes: p.notes, option: p.option } });
@@ -1487,6 +1502,7 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
       const set = (k, v) => { if (v === '' || v == null) delete l[k]; else l[k] = v; };
       const mode = MODE_SYN[norm(cell(r, 'mode'))] || MODE_SYN[norm(cell(r, 'name'))] || l.mode || 'taxi';
       l.mode = mode; if (day) l.day = day;
+      { const st = norm(cell(r, 'status')); l.confirmed = st ? !/voorstel|optie|nog/.test(st) : (exists ? l.confirmed === true : false); }
       legCount[l.day] = (legCount[l.day] || 0) + 1; l.order = legCount[l.day];
       set('dep', parseTime(cell(r, 'start'))); set('arr', parseTime(cell(r, 'end')));
       set('carrier', val(cell(r, 'carrier'))); set('booking', val(cell(r, 'booking'))); set('duration', val(cell(r, 'duration'))); set('notes', val(cell(r, 'notes')));
@@ -1801,6 +1817,7 @@ function endInfo(e) {
   if (e.place) { const p = S.places[e.place]; if (!p) return { name: 'Verwijderde plek' }; return { name: p.name, short: p.code || p.name, lat: p.lat, lng: p.lng, id: e.place }; }
   return null;
 }
+const legConf = (l) => !!(l && l.confirmed === true);
 const isConf = (p) => p && (p.type === 'hotel' ? !!p.chosen : (p.type === 'activity' || p.type === 'restaurant') ? p.confirmed !== false : true);
 const hasLL = (p) => p && typeof p.lat === 'number' && typeof p.lng === 'number';
 const legsFor = (n) => Object.entries(S.legs).filter(([, l]) => l.day === n).sort((a, b) => (a[1].order ?? 0) - (b[1].order ?? 0) || String(a[1].dep || '').localeCompare(String(b[1].dep || '')));
@@ -1994,8 +2011,10 @@ function legSummary(l, g) {
 function legPopup(id) {
   const l = S.legs[id]; if (!l) return ''; const { A, B, M, meta } = legSummary(l, legLines[id]?.geom);
   const btns = []; if (canEdit()) btns.push(`<button class="btn sm" data-act="edit" data-kind="leg" data-id="${id}" type="button">${ic('edit')}Bewerken</button>`);
+  if (canEdit() && !legConf(l)) btns.push(`<button class="btn sm primary" data-act="confirmleg" data-id="${id}" type="button">${ic('check')}Bevestigen</button>`);
   if (l.day) btns.push(`<button class="btn sm" data-act="day" data-n="${l.day}" type="button">Naar dag ${l.day}</button>`);
   return `<div class="pop"><div class="head"><span class="ico leg">${ic(M.icon)}</span><div><div class="name">${esc(M.label)}</div><div class="meta">${esc(l.day ? dayLabel(l.day) : '')}</div></div></div>
+  <div>${legConf(l) ? '<span class="badge chosen">Bevestigd</span>' : '<span class="badge">Voorstel</span>'}</div>
   <div class="legline">${esc(A?.name || '?')} <span class="arr">→</span> ${esc(B?.name || '?')}</div>
   ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}${kv([['Boeking', l.booking]])}${l.notes ? `<div class="notes">${linkify(l.notes)}</div>` : ''}${popActs(btns)}</div>`;
 }
@@ -2009,6 +2028,10 @@ function onAction(e) {
   if (act === 'edit') { map.closePopup(); openEditor(b.dataset.kind, b.dataset.id); }
   else if (act === 'choose') { chooseHotel(b.dataset.id); }
   else if (act === 'confirm') { confirmAct(b.dataset.id); }
+  else if (act === 'confirmleg') { setStatus('leg', b.dataset.id, true); }
+  else if (act === 'togglec') { setStatus(b.dataset.kind, b.dataset.id, b.checked); }
+  else if (act === 'statusview') { openStatus(); }
+  else if (act === 'statusfilter') { S.statusOpenOnly = b.checked; renderPanel(); }
   else if (act === 'askdel') { S.confirmDel = b.dataset.id; refreshDel(); }
   else if (act === 'nodel') { S.confirmDel = null; refreshDel(); }
   else if (act === 'dodel') { deleteHotels([b.dataset.id]); }
@@ -2057,7 +2080,9 @@ function renderOverview() {
     return `<button class="dayrow" type="button" data-act="nav" data-n="${n}"><span class="n">${n}</span><span class="t"><span class="ttl" style="font-size:14.5px;font-weight:600">${esc(d.title || 'Dag ' + n)}</span>${d.location ? `<span class="meta"> · ${esc(d.location)}</span>` : ''}${dt ? `<span class="meta"> · ${esc(fmtD(dt))}</span>` : ''}</span><span class="icons">${icons}</span></button>`;
   }).join('');
   const todo = Array.isArray(S.meta.todo) ? S.meta.todo : [];
-  const todoHtml = todo.length ? `<div class="sec"><div class="sec-h"><h3>Te doen · ${todo.filter((t) => !t.done).length} open</h3>${ce ? `<button class="btn sm" type="button" data-act="editmeta">${ic('edit')}Lijst</button>` : ''}</div><div class="todo">${todo.map((t, i) => `<label class="todo-row${t.done ? ' done' : ''}"><input type="checkbox" data-act="todo" data-i="${i}" ${t.done ? 'checked' : ''} ${ce ? '' : 'disabled'}><span>${linkify(t.t)}</span></label>`).join('')}</div></div>` : '';
+  const st = statusItems(); const nConf = st.filter((x) => x.on).length;
+  const statusBtn = `<button class="card clickable status-entry" type="button" data-act="statusview"><div class="row"><span class="ico leg">${ic('check')}</span><div class="grow"><div class="ttl">Bevestigingen</div><div class="meta">${nConf} van ${st.length} bevestigd · vink aan wat geboekt is</div></div>${ic('right')}</div></button>`;
+  const todoHtml = statusBtn + todo.length ? `<div class="sec"><div class="sec-h"><h3>Te doen · ${todo.filter((t) => !t.done).length} open</h3>${ce ? `<button class="btn sm" type="button" data-act="editmeta">${ic('edit')}Lijst</button>` : ''}</div><div class="todo">${todo.map((t, i) => `<label class="todo-row${t.done ? ' done' : ''}"><input type="checkbox" data-act="todo" data-i="${i}" ${t.done ? 'checked' : ''} ${ce ? '' : 'disabled'}><span>${linkify(t.t)}</span></label>`).join('')}</div></div>` : '';
   return todoHtml + `<div class="sec"><div class="sec-h"><h3>Verblijven</h3>${ce ? `<button class="btn sm" type="button" data-act="add" data-kind="hotel">${ic('plus')}Hotel</button>` : ''}</div>${ss.length ? `<div class="stays">${stayHtml}</div>` : '<div class="empty">Nog geen hotels. Voeg je eerste hotel toe, dan verschijnt het met een bed-icoon op de kaart.</div>'}</div>
   <div class="sec"><div class="sec-h"><h3>Dag voor dag</h3>${ce ? `<button class="btn sm" type="button" data-act="add" data-kind="day">${ic('plus')}Dag</button>` : ''}</div>${nums.length ? `<div class="daylist">${dayHtml}</div>` : '<div class="empty">Nog geen dagen. Voeg een dag toe om je programma te beginnen.</div>'}</div>`;
 }
@@ -2082,14 +2107,44 @@ function agRow({ time, kind, kindLabel, icon, cls, title, meta, desc, id, leg, p
     <div class="ag-acts">${actions || ''}</div></div>`;
 }
 const delConfirm = (txt, act, attr) => `<div class="confirm ag-confirm"><span style="flex:1">${txt}</span><button class="btn sm" type="button" data-act="nodel">Nee</button><button class="btn sm primary" type="button" data-act="${act}" ${attr} style="background:var(--danger);color:#fff">Verwijder</button></div>`;
+function legKeys(n) {
+  const out = {}; let prev = null;
+  for (const [id, l] of legsFor(n)) { let k; if (l.dep) k = tkey(l.dep, 8); else if (l.arr) k = tkey(l.arr, 8) - 0.5; else k = prev != null ? prev + 0.01 : 8; out[id] = k; prev = k; }
+  return out;
+}
+function statusItems() {
+  const LK = {}; for (const n of dayNums()) Object.assign(LK, legKeys(n));
+  const out = [];
+  for (const [id, l] of Object.entries(S.legs)) { const { A, B, M } = legSummary(l, null); out.push({ kind: 'leg', id, day: l.day || 0, key: (LK[id] ?? 8) + (l.order || 0) * 0.0001, icon: M.icon, cls: 'leg ' + (M.kind || 'road'), label: M.label, title: `${A?.short || A?.name || '?'} → ${B?.short || B?.name || '?'}`, time: l.dep || (l.arr ? 'aank. ' + l.arr : ''), on: legConf(l) }); }
+  for (const [id, p] of Object.entries(S.places)) {
+    if (p.type === 'hotel') out.push({ kind: 'hotel', id, day: p.from || 0, key: 30, icon: 'bed', cls: 'hotel', label: 'Hotel' + (p.to && p.to !== p.from ? ` · nacht ${p.from}–${p.to}` : ''), title: p.name, time: '', on: !!p.chosen });
+    if (p.type === 'activity' || p.type === 'restaurant') { const K = KIND[p.type]; out.push({ kind: p.type, id, day: p.day || 0, key: tkey(p.time, p.type === 'restaurant' ? 19 : 13) + (p.order || 0) * 0.0001, icon: K.icon, cls: K.cls, label: K.label, title: p.name, time: [p.time, p.endTime].filter(Boolean).join('–'), on: isConf(p) }); }
+  }
+  return out.sort((a, b) => (a.day || 99) - (b.day || 99) || a.key - b.key);
+}
+function renderStatus() {
+  const ce = canEdit(); const all = statusItems(); const n = all.filter((x) => x.on).length;
+  const list = S.statusOpenOnly ? all.filter((x) => !x.on) : all;
+  let html = '', cur = -1;
+  for (const x of list) {
+    if (x.day !== cur) { cur = x.day; const dd = dayDoc(cur); html += `<div class="st-day">${cur ? esc(dayLabel(cur)) + (dd && dd[1].location ? ' · ' + esc(dd[1].location) : '') : 'Zonder dag'}</div>`; }
+    html += `<label class="st-row${x.on ? ' on' : ''}"><input type="checkbox" data-act="togglec" data-kind="${x.kind}" data-id="${x.id}" ${x.on ? 'checked' : ''} ${ce ? '' : 'disabled'}><span class="ico ${x.cls}${x.on ? '' : ' peek'}">${ic(x.icon)}</span><span class="st-body"><span class="st-kind">${esc(x.label)}${x.time ? ' · ' + esc(x.time) : ''}</span><span class="st-title">${esc(x.title)}</span></span></label>`;
+  }
+  return `<div class="daynav"><button class="iconbtn" type="button" data-act="nav" data-n="0" aria-label="Terug naar overzicht">${ic('left')}</button><div class="grow"><div class="eyebrow" style="justify-content:flex-start">${n} van ${all.length} bevestigd</div><h2>Bevestigingen</h2></div></div>
+  <p class="sub" style="margin:0">Vink aan wat geboekt of zeker is. Bevestigde hotels, activiteiten en restaurants staan op de kaart.</p>
+  <label class="check" style="font-weight:500"><input type="checkbox" data-act="statusfilter" ${S.statusOpenOnly ? 'checked' : ''}> Alleen nog niet bevestigd tonen</label>
+  <div class="st-list">${html || '<div class="empty">Alles is bevestigd.</div>'}</div>`;
+}
 function renderDay(n) {
   const e = dayDoc(n); const d = e ? e[1] : { title: '' }; const ce = canEdit(); const nums = dayNums(); const i = nums.indexOf(n);
   const editBtn = (kind, id, lbl) => ce ? `<button class="btn ghost sm" type="button" data-act="edit" data-kind="${kind}" data-id="${id}" aria-label="${lbl} bewerken" title="Bewerken">${ic('edit')}</button>` : '';
   const items = [];
+  const LK = legKeys(n);
   legsFor(n).forEach(([id, l], k) => {
     const { A, B, M, km } = legSummary(l, legLines[id]?.geom); const g = legLines[id]?.geom;
     const meta = [l.dep && l.arr ? 'aankomst ' + l.arr : '', l.duration, km ? (g && g.km ? 'ca. ' : '± ') + km + ' km' : '', l.carrier, l.booking ? 'boeking ' + l.booking : ''].filter(Boolean).join(' · ');
-    items.push({ key: tkey(l.dep, 8) + k * 0.001, html: agRow({ time: l.dep, cls: 'leg ' + (M.kind || 'road'), icon: M.icon, kindLabel: 'Reis · ' + M.label, title: `${esc(A?.short || A?.name || '?')} <span class="arr">→</span> ${esc(B?.short || B?.name || '?')}`, meta, desc: l.notes, id, leg: true, actions: editBtn('leg', id, 'Vervoer') }) });
+    const lp = !legConf(l);
+    items.push({ key: LK[id] + k * 0.0001, html: agRow({ time: [l.dep, !l.dep && l.arr ? 'aank. ' + l.arr : ''].filter(Boolean).join(''), cls: 'leg ' + (M.kind || 'road'), icon: M.icon, kindLabel: 'Reis · ' + M.label, title: `${esc(A?.short || A?.name || '?')} <span class="arr">→</span> ${esc(B?.short || B?.name || '?')}`, meta, desc: l.notes, id, leg: true, proposal: lp, actions: (lp && ce ? `<button class="btn sm" type="button" data-act="confirmleg" data-id="${id}" title="Bevestigen">${ic('check')}<span class="hide-sm">Bevestig</span></button>` : '') + editBtn('leg', id, 'Vervoer') }) });
   });
   actsFor(n).concat(restsFor(n)).forEach(([id, a], k) => {
     const K = KIND[a.type]; const prop = !isConf(a);
@@ -2130,16 +2185,16 @@ function renderPanel() {
   if (!S.db) { v.innerHTML = window.STANDALONE ? '<div class="empty">Log in om de reis te bekijken.</div>' : `<div class="empty">De reis staat in een gedeelde opslag en is alleen te zien als je bent ingelogd bij Claude. Log in en open deze pagina opnieuw.</div>`; return; }
   if (S.loaded < 4) { v.innerHTML = '<div class="empty">De reis wordt geladen…</div>'; return; }
   if (S.sel && !dayDoc(S.sel)) S.sel = null;
-  const keep = v.scrollTop; const same = v.dataset.sel === String(S.sel);
-  v.innerHTML = S.sel ? renderDay(S.sel) : renderOverview();
-  v.dataset.sel = String(S.sel);
+  const keep = v.scrollTop; const same = v.dataset.sel === String(S.sel) + (S.view || '');
+  v.innerHTML = S.sel ? renderDay(S.sel) : S.view === 'status' ? renderStatus() : renderOverview();
+  v.dataset.sel = String(S.sel) + (S.view || '');
   v.scrollTop = same ? keep : 0;
 }
-$('#view').addEventListener('click', (e) => { if (e.target.closest('a[href]')) { e.stopPropagation(); return; } if (e.target.closest('[data-act="edit"],[data-act="choose"],[data-act="confirm"],[data-act="add"],[data-act="editday"],[data-act="editmeta"],[data-act="editday"],[data-act="askdel"],[data-act="nodel"],[data-act="dodel"],[data-act="askclean"],[data-act="doclean"]')) e.stopPropagation(); onAction(e); });
+$('#view').addEventListener('click', (e) => { if (e.target.closest('a[href]')) { e.stopPropagation(); return; } if (e.target.closest('[data-act="edit"],[data-act="choose"],[data-act="confirm"],[data-act="confirmleg"],[data-act="statusview"],[data-act="add"],[data-act="editday"],[data-act="editmeta"],[data-act="editday"],[data-act="askdel"],[data-act="nodel"],[data-act="dodel"],[data-act="askclean"],[data-act="doclean"]')) e.stopPropagation(); onAction(e); });
 $('#days').addEventListener('click', (e) => { const b = e.target.closest('[data-n]'); if (b) selectDay(+b.dataset.n); });
 $('#tripEdit').addEventListener('click', () => openEditor('meta', 'meta'));
 $('#fitAll').addEventListener('click', () => selectDay(0));
-function selectDay(n) { S.sel = n || null; S.peek = null; map.closePopup(); render(); fitSel(); try { localStorage.setItem('reis-sel', String(n || 0)); } catch (_) {} }
+function selectDay(n) { S.sel = n || null; S.view = null; S.peek = null; map.closePopup(); render(); fitSel(); try { localStorage.setItem('reis-sel', String(n || 0)); } catch (_) {} }
 
 let raf = 0;
 function render() { renderMap(); renderPanel(); }
@@ -2171,6 +2226,15 @@ async function deleteHotels(ids) {
   if (n) toast(n === 1 ? 'Hotel verwijderd' : n + ' hotels verwijderd');
   renderPanel();
 }
+async function setStatus(kind, id, on) {
+  map.closePopup();
+  if (kind === 'leg') { const l = S.legs[id]; if (l) await write('legs', id, { ...l, confirmed: !!on }); return; }
+  const p = S.places[id]; if (!p) return; if (S.peek === id) S.peek = null;
+  if (p.type === 'hotel') { if (on) return chooseHotel(id); await write('places', id, { ...p, chosen: false }); return; }
+  await write('places', id, { ...p, confirmed: !!on });
+}
+window.APP_OPEN_STATUS = () => openStatus();
+function openStatus() { S.sel = null; S.view = 'status'; S.peek = null; map.closePopup(); render(); fitSel(); const v = $('#view'); if (v) v.scrollTop = 0; }
 async function confirmAct(id) {
   const a = S.places[id]; if (!a) return; if (S.peek === id) S.peek = null; map.closePopup();
   if (await write('places', id, { ...a, confirmed: true })) toast(a.name + ' bevestigd');
@@ -2255,7 +2319,7 @@ function openEditor(kind, id, preset = {}, keepStack = false) {
       + F.text('address', 'Adres', d.address) + `<div class="grid2">${F.text('phone', 'Telefoon', d.phone)}${F.text('booking', 'Reservering', d.booking, { ph: 'bv. 19:30, 4 personen' })}</div>`
       + `<div class="grid2">${F.text('price', 'Prijsindicatie', d.price, { ph: 'bv. ฿฿' })}${F.text('url', 'Website', d.url, { type: 'url', ph: 'https://' })}</div>` + F.text('maps', 'Google Maps-link', d.maps, { type: 'url', ph: 'https://maps.app.goo.gl/…' }) + F.area('notes', 'Notities', d.notes);
   } else if (kind === 'leg') {
-    h = `<div class="grid2">${F.sel('day', 'Dag', d.day, dayOpts(false))}${F.sel('mode', 'Vervoer', d.mode, Object.entries(MODES).map(([v, m]) => ({ v, t: m.label })))}</div>`
+    h = F.check('confirmed', 'Bevestigd (geboekt)', d.confirmed === true) + `<div class="grid2">${F.sel('day', 'Dag', d.day, dayOpts(false))}${F.sel('mode', 'Vervoer', d.mode, Object.entries(MODES).map(([v, m]) => ({ v, t: m.label })))}</div>`
       + F.sel('from', 'Van', endVal(d.from), endOpts()) + F.sel('to', 'Naar', endVal(d.to), endOpts())
       + `<div class="hint" style="font-size:12.5px;color:var(--muted);margin-top:-6px">Mis je een luchthaven of pier? <button class="btn ghost sm" type="button" id="addPoint" style="padding:0;color:var(--hotel)">Voeg een vervoerspunt toe</button></div>`
       + `<div class="grid2">${F.text('dep', 'Vertrek', d.dep, { type: 'time' })}${F.text('arr', 'Aankomst', d.arr, { type: 'time' })}</div>`
@@ -2441,6 +2505,7 @@ if (innerWidth <= 820) $('#legend').open = false;
   menu.addEventListener('click',(e)=>{ if(e.target.closest('button')) setMenu(false); });
   menu.addEventListener('change',()=>setMenu(false));
   $('#menuTrip').addEventListener('click',()=>$('#tripEdit').click());
+  $('#menuStatus').addEventListener('click',()=>window.APP_OPEN_STATUS && window.APP_OPEN_STATUS());
   // ---- Excel ----
   $('#xlExport').addEventListener('click',async()=>{
     try{

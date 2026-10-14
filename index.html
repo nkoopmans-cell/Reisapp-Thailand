@@ -1,3 +1,53 @@
+<!-- Laad de Firebase scripts in -->
+<script type="module">
+  import { initializeApp } from "https://gstatic.com";
+  import { getDatabase, ref, set, onValue } from "https://gstatic.com";
+
+  // TODO: Vervang deze configuratie met jouw eigen gegevens uit de Firebase Console!
+  const firebaseConfig = {
+	apiKey: "AIzaSyAh6kuIOLZYxt7tr53CbeRlag2YzQnrMNU",
+   	authDomain: "reisapp---thailand.firebaseapp.com",
+  	projectId: "reisapp---thailand",
+  	storageBucket: "reisapp---thailand.firebasestorage.app",
+  	messagingSenderId: "285284235873",
+  	appId: "1:285284235873:web:183f3a77070a183f000820",
+  	measurementId: "G-WDFPZ3K38H"
+  };
+
+  // Start verbinding met Firebase
+  const app = initializeApp(firebaseConfig);
+  const database = getDatabase(app);
+  const dbRef = ref(database, 'reisGegevens');
+
+  // INTERACTION CODE:
+
+  // 1. LUISTEREN: Dit zorgt ervoor dat je laptop en telefoon LIVE updaten
+  onValue(dbRef, (snapshot) => {
+    const data = snapshot.val();
+    if (data && data.tekst) {
+      // Als je een invoerveld hebt met id="mijnInvoer", vult dit automatisch de nieuwe tekst in
+      const inputVeld = document.getElementById("mijnInvoer");
+      if (inputVeld && document.activeElement !== inputVeld) {
+        inputVeld.value = data.tekst;
+      }
+    }
+  });
+
+  // 2. VERSTUREN: Zodra je typt, wordt het direct naar de cloud gestuurd
+  window.addEventListener('DOMContentLoaded', () => {
+    const inputVeld = document.getElementById("mijnInvoer");
+    if (inputVeld) {
+      inputVeld.addEventListener('input', (e) => {
+        set(dbRef, {
+          tekst: e.target.value
+        });
+      });
+    }
+  });
+</script>
+
+
+
 <!doctype html>
 <html lang="nl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">

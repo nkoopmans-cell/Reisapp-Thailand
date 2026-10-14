@@ -946,6 +946,8 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
 
 .sa-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 12px; color: var(--muted); margin-top: 2px; }
 .sa-bar .btn { padding: 2px 6px; font-size: 12px; color: var(--hotel); }
+#saWho.sync-on { color: var(--slow); }
+#saWho.sync-off { color: var(--accent); }
 .citylbl { display: none; }
 #xlConfirm { position: fixed; inset: 0; z-index: 1900; background: rgba(10,18,22,.45); display: grid; place-items: center; padding: 16px; }
 .xl-box { background: var(--paper); border-radius: 14px; padding: 22px 20px; box-shadow: var(--shadow); text-align: left; justify-items: stretch; }
@@ -1102,7 +1104,7 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
   const db = {
     collection: (c) => ({
       doc: (id) => wrapDoc(col(c).doc(id)),
-      onSnapshot: (next, err) => col(c).onSnapshot((s) => next({ docs: s.docs.map((d) => ({ id: d.id, exists: true, data: () => d.data() })) }), (e) => { err && err(mapErr(e)); }),
+      onSnapshot: (next, err) => col(c).onSnapshot({ includeMetadataChanges: true }, ((first) => (s) => { live(s.metadata); if (!first.done || s.docChanges().length) { first.done = true; next({ docs: s.docs.map((d) => ({ id: d.id, exists: true, data: () => d.data() })) }); } })({}), (e) => { err && err(mapErr(e)); }),
     }),
     doc: (p) => { const [c, id] = p.split('/'); return wrapDoc(col(c).doc(id)); },
   };
@@ -1204,9 +1206,26 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
     if (!started) { started = true; resolveReady(); }
   });
 
+  // ---------- connection state + quick reconnect when the app comes back to the foreground ----------
+  let curUser = null, fromCache = false, pending = false;
+  function live(m) { if (!m) return; const fc = !!m.fromCache, pw = !!m.hasPendingWrites; if (fc !== fromCache || pw !== pending) { fromCache = fc; pending = pw; setUserBar(curUser); } }
+  let lastKick = 0;
+  async function kick() {
+    if (!curUser || Date.now() - lastKick < 3000) return; lastKick = Date.now();
+    try { await fs.disableNetwork(); await fs.enableNetwork(); } catch (_) {}
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') kick(); });
+  window.addEventListener('focus', kick);
+  window.addEventListener('online', () => { kick(); setUserBar(curUser); });
+  window.addEventListener('offline', () => setUserBar(curUser));
+  window.addEventListener('pageshow', (e) => { if (e.persisted) kick(); });
+
   function setUserBar(u) {
+    curUser = u;
     const who = $('#saWho'); if (!who) return;
-    who.textContent = u ? 'Gesynchroniseerd · ' + (u.email || '') : '';
+    const off = !navigator.onLine || fromCache;
+    who.textContent = u ? (off ? '○ Offline · wijzigingen worden later verstuurd' : pending ? '● Opslaan…' : '● Live gesynchroniseerd') + ' · ' + (u.email || '') : '';
+    who.className = u ? (off ? 'sync-off' : 'sync-on') : '';
     $('#saLogout').hidden = !u;
   }
   document.addEventListener('DOMContentLoaded', () => {

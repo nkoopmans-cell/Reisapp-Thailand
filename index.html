@@ -1245,7 +1245,9 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
   };
 })();
 </script>
-<script>// Excel import/export in the layout of "Thailand_Reisdossier_2027_Definitief.xlsx":
+<script>// Excel import/export. Export: Reisoverzicht (dossier layout + Notities), Planning (one row per item), Plaatsen, Reis, Transport, Todo.
+// Import: a workbook with a Planning sheet is applied in full (rows added/changed/removed); an old dossier without it is merged.
+// Original dossier layout ("Thailand_Reisdossier_2027_Definitief.xlsx"):
 // sheet Reisoverzicht (Datum | Dag | Locatie | Hotel | status | Programma | Vervoer | Reistijd | Boeking/Suggestie),
 // one sheet per region with activities (Activiteit | Boeking …), Transport (Traject | Suggestie) and Todo (Taak).
 (function () {
@@ -1263,7 +1265,7 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
   const nogTeBoeken = (s) => /nog\s*te\s*boeken/i.test(String(s || ''));
   const confirmedTxt = (s) => /^(bevestigd|geboekt|ja|ok)/i.test(String(s || '').trim());
   const WEEKDAYS = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
-  const MODE_TXT = { vlucht: 'Vliegtuig', taxi: 'Taxi', minivan: 'Transfer', bus: 'Bus', auto: 'Auto', trein: 'Trein', boot: 'Boot', longtail: 'Boot', speedboot: 'Boot', veerboot: 'Ferry', fiets: 'Fiets', lopen: 'Lopend' };
+  const MODE_TXT = { vlucht: 'Vliegtuig', taxi: 'Taxi', minivan: 'Transfer', bus: 'Bus', auto: 'Auto', tuktuk: 'Tuktuk', trein: 'Trein', boot: 'Boot', longtail: 'Boot', speedboot: 'Boot', veerboot: 'Ferry', fiets: 'Fiets', lopen: 'Lopend' };
 
   function dateFor(start, n) { const d = new Date(start + 'T12:00:00'); d.setDate(d.getDate() + n - 1); return d; }
   const fmtDate = (d) => `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
@@ -1277,6 +1279,203 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
   }
   const isoOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
+  // ---------- full planning sheet (one row per item) ----------
+  const MODE_LABEL = { vlucht: 'Vlucht', taxi: 'Taxi', minivan: 'Minivan', bus: 'Bus', auto: 'Huurauto', tuktuk: 'Tuktuk', trein: 'Trein', boot: 'Boot', longtail: 'Longtailboot', speedboot: 'Speedboot', veerboot: 'Veerboot', fiets: 'Fiets', lopen: 'Lopen' };
+  const MODE_SYN = { vliegtuig: 'vlucht', vlucht: 'vlucht', flight: 'vlucht', taxi: 'taxi', grab: 'taxi', minivan: 'minivan', transfer: 'minivan', van: 'minivan', bus: 'bus', huurauto: 'auto', auto: 'auto', tuktuk: 'tuktuk', 'tuk tuk': 'tuktuk', songthaew: 'taxi', trein: 'trein', boot: 'boot', longtailboot: 'longtail', longtail: 'longtail', speedboot: 'speedboot', veerboot: 'veerboot', ferry: 'veerboot', fiets: 'fiets', lopen: 'lopen', lopend: 'lopen' };
+  const PTKIND_TXT = { luchthaven: 'Luchthaven', pier: 'Pier', station: 'Station', overig: 'Overig' };
+  const PTKIND_SYN = { luchthaven: 'luchthaven', vliegveld: 'luchthaven', airport: 'luchthaven', pier: 'pier', haven: 'pier', station: 'station', overig: 'overig' };
+  const num = (v) => (typeof v === 'number' && isFinite(v)) ? v : '';
+  const parseNum = (v) => { if (typeof v === 'number') return v; const t = String(v ?? '').trim().replace(',', '.'); if (!t || isNaN(+t)) return null; return +t; };
+  const parseTime = (v) => {
+    if (v instanceof Date && !isNaN(v)) return pad(v.getHours()) + ':' + pad(v.getMinutes());
+    if (typeof v === 'number' && v >= 0 && v < 1) { const m = Math.round(v * 1440); return pad(Math.floor(m / 60)) + ':' + pad(m % 60); }
+    return val(v);
+  };
+  const ownMaps = (p) => { const re = /\bhttps?:\/\/[^\s<>"']+/gi; const ok = (u) => /^https?:\/\/(maps\.app\.goo\.gl|goo\.gl\/maps|(www\.)?google\.[a-z.]+\/maps|maps\.google\.)/i.test(u); if (p.maps && ok(p.maps)) return p.maps; for (const f of [p.url, p.desc, p.notes]) for (const m of String(f || '').matchAll(re)) if (ok(m[0])) return m[0]; return ''; };
+  // column keys and headers of the Planning sheet
+  const PLAN = [
+    ['day', 'Dag', 6], ['date', 'Datum', 12], ['start', 'Begintijd', 10], ['end', 'Eindtijd', 10], ['kind', 'Soort', 12], ['status', 'Status', 12],
+    ['name', 'Naam', 34], ['mode', 'Vervoermiddel', 14], ['from', 'Van', 28], ['to', 'Naar', 28], ['place', 'Plaats', 20], ['lastNight', 'Laatste nacht', 8],
+    ['address', 'Adres', 36], ['desc', 'Omschrijving', 44], ['booking', 'Boeking / ticket', 22], ['carrier', 'Maatschappij / vluchtnr.', 22], ['duration', 'Reisduur', 14],
+    ['price', 'Prijs', 14], ['phone', 'Telefoon', 16], ['room', 'Kamer', 16], ['cuisine', 'Keuken', 18], ['url', 'Website', 30], ['maps', 'Google Maps-link', 34],
+    ['lat', 'Breedtegraad', 12], ['lng', 'Lengtegraad', 12], ['notes', 'Notities', 40], ['option', 'Optie', 7], ['id', 'ID (niet wijzigen)', 22],
+  ];
+  const PLAN_W = PLAN.map((c) => c[2]);
+  const KIND_TXT = { leg: 'Vervoer', activity: 'Activiteit', restaurant: 'Restaurant', hotel: 'Hotel' };
+  function endName(data, e) {
+    if (!e) return '';
+    if (e.stay) { const h = Object.values(data.places).find((p) => p.type === 'hotel' && p.stay === e.stay); return h ? (h.stayName || h.name) : e.stay; }
+    if (e.place) { const p = data.places[e.place]; return p ? p.name : ''; }
+    return '';
+  }
+  function planningRows(data, meta) {
+    const rows = [PLAN.map((c) => c[1])];
+    const items = [];
+    const T = (t, fb) => { const m = /(\d{1,2})[:.](\d{2})/.exec(t || ''); if (m) return +m[1] + +m[2] / 60; const l = String(t || '').toLowerCase(); for (const [w, v] of [['vroeg', 6.5], ['ontbijt', 8], ['hele dag', 9.5], ['ochtend', 9], ['lunch', 12.5], ['middag', 14], ['diner', 19], ['avond', 19.5], ['nacht', 22]]) if (l.includes(w)) return v; return fb; };
+    for (const [id, l] of Object.entries(data.legs || {})) items.push({ id, day: l.day || 0, key: T(l.dep, 8) + (l.order || 0) * 0.001, r: { kind: 'Vervoer', start: l.dep, end: l.arr, name: MODE_LABEL[l.mode] || '', mode: MODE_LABEL[l.mode] || '', from: endName(data, l.from), to: endName(data, l.to), booking: l.booking, carrier: l.carrier, duration: l.duration, notes: l.notes } });
+    for (const [id, p] of Object.entries(data.places || {})) {
+      if (p.type === 'activity' || p.type === 'restaurant') items.push({ id, day: p.day || 0, key: T(p.time, p.type === 'restaurant' ? 19 : 13) + (p.order || 0) * 0.0001, r: { kind: KIND_TXT[p.type], status: p.confirmed === false ? 'voorstel' : 'bevestigd', start: p.time, end: p.endTime, name: p.name, place: p.region, address: p.address, desc: p.desc, booking: p.booking, price: p.price, phone: p.phone, cuisine: p.cuisine, url: p.url, maps: ownMaps(p), lat: num(p.lat), lng: num(p.lng), notes: p.notes } });
+      if (p.type === 'hotel') items.push({ id, day: p.from || 0, key: 30 + (p.chosen ? 0 : 0.1), r: { kind: 'Hotel', status: p.chosen ? 'bevestigd' : 'voorstel', start: p.checkin, end: p.checkout, name: p.name, place: p.stayName, lastNight: p.to ?? p.from, address: p.address, desc: p.desc, booking: p.booking, price: p.price, phone: p.phone, room: p.room, url: p.url, maps: ownMaps(p), lat: num(p.lat), lng: num(p.lng), notes: p.notes, option: p.option } });
+    }
+    items.sort((a, b) => (a.day || 99) - (b.day || 99) || a.key - b.key);
+    for (const it of items) {
+      const dt = meta.startDate && it.day ? fmtDate(dateFor(meta.startDate, it.day)) : '';
+      const r = { ...it.r, day: it.day || '', date: dt, id: it.id };
+      rows.push(PLAN.map(([k]) => r[k] ?? ''));
+    }
+    return rows;
+  }
+
+  // ---------- full import (workbook exported by this app, with a Planning sheet) ----------
+  async function mergeFull(X, wb, data, geocode, log) {
+    data = JSON.parse(JSON.stringify(data || {}));
+    for (const c of ['trip', 'days', 'places', 'legs']) data[c] = data[c] || {};
+    const meta = data.trip.meta = data.trip.meta || {};
+    const findSheet = (n) => wb.SheetNames.find((s) => norm(s) === norm(n));
+    // Reis
+    const rs = findSheet('Reis');
+    if (rs) for (const r of sheetRows(X, wb.Sheets[rs]).slice(1)) {
+      const k = norm(r[0]); const v = val(r[1]);
+      if (k === 'naam') meta.title = v; else if (k === 'land') meta.country = v; else if (k === 'reizigers') meta.travelers = v; else if (k === 'notities') meta.notes = v;
+      else if (k === 'startdatum') { const d = parseDate(r[1]); if (d) meta.startDate = isoOf(d); }
+    }
+    // days from Reisoverzicht
+    const ovName = findSheet('Reisoverzicht');
+    if (ovName) {
+      const ov = sheetRows(X, wb.Sheets[ovName]);
+      const H = ov[0].map(norm); const col = (n, fb) => { const i = H.indexOf(norm(n)); return i >= 0 ? i : fb; };
+      const C = { date: col('Datum', 0), loc: col('Locatie', 2), prog: col('Programma', 5), vervoer: col('Vervoer', 6), tijd: col('Reistijd', 7), boek: H.findIndex((h) => h.startsWith('boeking')), notes: col('Notities', -1) };
+      if (C.boek < 0) C.boek = 8;
+      const rows = ov.slice(1).filter((r) => !isDash(r[C.date]) || !isDash(r[C.prog]));
+      const first = parseDate(rows[0] && rows[0][C.date]); if (first && !rs) meta.startDate = isoOf(first);
+      const old = data.days; data.days = {};
+      rows.forEach((r, i) => {
+        const n = i + 1; const o = Object.values(old).find((d) => d.n === n) || {};
+        const d = { ...o, n, title: val(r[C.prog]) || ('Dag ' + n), location: val(r[C.loc]), transport: val(r[C.vervoer]), traveltime: val(r[C.tijd]), bookingHint: val(r[C.boek]) };
+        if (C.notes >= 0) d.notes = val(r[C.notes]);
+        for (const k of Object.keys(d)) if (d[k] === '' || d[k] === undefined) delete d[k];
+        data.days['d' + pad(n)] = d;
+      });
+      log.days = rows.length;
+    }
+    // points (Plaatsen)
+    const ps = findSheet('Plaatsen');
+    if (ps) {
+      const pr = sheetRows(X, wb.Sheets[ps]); const H = pr[0].map(norm); const c = (n) => H.findIndex((h) => h.startsWith(norm(n)));
+      const ci = { name: c('Naam'), kind: c('Soort'), code: c('Code'), lat: c('Breedtegraad'), lng: c('Lengtegraad'), notes: c('Notities'), id: c('ID') };
+      for (const r of pr.slice(1)) {
+        const name = val(r[ci.name]); if (!name) continue;
+        const id = ci.id >= 0 ? val(r[ci.id]) : '';
+        const p = { ...(id && data.places[id] ? data.places[id] : {}), type: 'point', name, kind: PTKIND_SYN[norm(r[ci.kind])] || 'overig' };
+        const code = ci.code >= 0 ? val(r[ci.code]) : ''; if (code) p.code = code; else delete p.code;
+        const nt = ci.notes >= 0 ? val(r[ci.notes]) : ''; if (nt) p.notes = nt; else delete p.notes;
+        const la = ci.lat >= 0 ? parseNum(r[ci.lat]) : null, lo = ci.lng >= 0 ? parseNum(r[ci.lng]) : null;
+        if (la != null && lo != null) { p.lat = la; p.lng = lo; } else if (typeof p.lat !== 'number') p._geo = name;
+        data.places[id && data.places[id] ? id : 'pt-' + slug(name)] = p;
+      }
+    }
+    // Planning
+    const pl = findSheet('Planning');
+    const pr = sheetRows(X, wb.Sheets[pl]);
+    const H = pr[0].map(norm);
+    const ci = {}; for (const [k, h] of PLAN) { const nh = norm(h); let i = H.indexOf(nh); if (i < 0) i = H.findIndex((x) => x.startsWith(nh.split(' ')[0])); ci[k] = i; }
+    const cell = (r, k) => ci[k] >= 0 ? r[ci[k]] : '';
+    const seen = new Set(); let added = 0, updated = 0;
+    const planRows = pr.slice(1).filter((r) => val(cell(r, 'name')) || val(cell(r, 'mode')) || val(cell(r, 'id')));
+    // first hotels (legs refer to their stays), then the rest
+    const order = (r) => /hotel/i.test(val(cell(r, 'kind'))) ? 0 : 1;
+    const legRows = [];
+    const counters = {};
+    for (const r of [...planRows].sort((a, b) => order(a) - order(b))) {
+      let kind = norm(cell(r, 'kind'));
+      if (!kind) kind = val(cell(r, 'mode')) ? 'vervoer' : 'activiteit';
+      const id0 = val(cell(r, 'id'));
+      const day = parseNum(cell(r, 'day')) || (() => { const d = parseDate(cell(r, 'date')); if (!d || !meta.startDate) return null; return Math.round((d - new Date(meta.startDate + 'T12:00:00')) / 864e5) + 1; })();
+      const set = (o, k, v) => { if (v === '' || v == null) delete o[k]; else o[k] = v; };
+      if (kind.startsWith('vervoer') || kind.startsWith('reis')) { legRows.push({ r, id0, day }); continue; }
+      const isHotel = kind.startsWith('hotel'), isRest = kind.startsWith('restaurant');
+      const type = isHotel ? 'hotel' : isRest ? 'restaurant' : 'activity';
+      const exists = id0 && data.places[id0] && data.places[id0].type === type;
+      const id = exists ? id0 : (type === 'hotel' ? 'hotel-' : type === 'restaurant' ? 'rest-' : 'act-') + slug(val(cell(r, 'name')) || 'nieuw') + '-' + Math.random().toString(36).slice(2, 6);
+      const p = exists ? { ...data.places[id] } : { type };
+      p.type = type; set(p, 'name', val(cell(r, 'name')) || p.name || 'Naamloos');
+      const st = norm(cell(r, 'status')); const conf = st ? !/voorstel|optie|nog/.test(st) : true;
+      for (const k of ['address', 'desc', 'booking', 'price', 'phone', 'url', 'notes']) set(p, k, val(cell(r, k)));
+      const mp = val(cell(r, 'maps')); set(p, 'maps', isUrl(mp) ? mp : '');
+      const la = parseNum(cell(r, 'lat')), lo = parseNum(cell(r, 'lng'));
+      // coordinates: given -> use; new row without -> look the place up; existing row emptied -> no fixed place on the map
+      if (la != null && lo != null) { p.lat = la; p.lng = lo; }
+      else if (!exists) p._geo = [/nog te boeken/i.test(p.name) ? '' : p.name, val(cell(r, 'place'))].filter(Boolean).join(', ');
+      else if (ci.lat >= 0 && ci.lng >= 0 && isDash(cell(r, 'lat')) && isDash(cell(r, 'lng'))) { delete p.lat; delete p.lng; }
+      if (isHotel) {
+        set(p, 'checkin', parseTime(cell(r, 'start'))); set(p, 'checkout', parseTime(cell(r, 'end'))); set(p, 'room', val(cell(r, 'room'))); set(p, 'option', val(cell(r, 'option')));
+        p.chosen = conf; if (day) p.from = day; const ln = parseNum(cell(r, 'lastNight')); p.to = ln || p.from || p.to;
+        const stayName = val(cell(r, 'place')) || p.stayName || p.name;
+        // keep the stay key of existing hotels that share this stay name, so transport keeps pointing at it
+        const twin = Object.values(data.places).find((h) => h.type === 'hotel' && h.stayName && norm(h.stayName) === norm(stayName));
+        p.stay = (twin && twin.stay) || (exists && norm(p.stayName) === norm(stayName) && p.stay) || slug(stayName);
+        p.stayName = stayName;
+      } else {
+        set(p, 'time', parseTime(cell(r, 'start'))); set(p, 'endTime', parseTime(cell(r, 'end'))); set(p, 'region', val(cell(r, 'place')));
+        if (isRest) set(p, 'cuisine', val(cell(r, 'cuisine')));
+        p.confirmed = conf; if (day) p.day = day; else delete p.day;
+        counters[day] = (counters[day] || 0) + 1; p.order = counters[day];
+      }
+      data.places[id] = p; seen.add(id); exists ? updated++ : added++;
+    }
+    // transport rows
+    const resolve = (txt) => {
+      const t = norm(txt); if (!t) return null;
+      const P = Object.entries(data.places);
+      let m = P.find(([, p]) => p.type === 'point' && (norm(p.name) === t || (p.code && norm(p.code) === t)));
+      if (m) return { place: m[0] };
+      m = P.find(([, p]) => p.type === 'hotel' && (norm(p.stayName) === t || norm(p.name) === t));
+      if (m) return { stay: m[1].stay };
+      m = P.find(([, p]) => (p.type === 'activity' || p.type === 'restaurant') && norm(p.name) === t);
+      if (m) return { place: m[0] };
+      m = P.find(([, p]) => p.type === 'point' && (norm(p.name).includes(t) || t.includes(norm(p.name))));
+      if (m) return { place: m[0] };
+      const id = 'pt-' + slug(txt); data.places[id] = { type: 'point', kind: /airport|luchthaven|vliegveld/i.test(txt) ? 'luchthaven' : /pier|haven/i.test(txt) ? 'pier' : 'overig', name: String(txt).trim(), _geo: String(txt).trim() };
+      log.newPoints = (log.newPoints || 0) + 1; return { place: id };
+    };
+    const legCount = {};
+    for (const { r, id0, day } of legRows) {
+      const exists = id0 && data.legs[id0];
+      const id = exists ? id0 : 'leg-' + Math.random().toString(36).slice(2, 9);
+      const l = exists ? { ...data.legs[id] } : {};
+      const set = (k, v) => { if (v === '' || v == null) delete l[k]; else l[k] = v; };
+      const mode = MODE_SYN[norm(cell(r, 'mode'))] || MODE_SYN[norm(cell(r, 'name'))] || l.mode || 'taxi';
+      l.mode = mode; if (day) l.day = day;
+      legCount[l.day] = (legCount[l.day] || 0) + 1; l.order = legCount[l.day];
+      set('dep', parseTime(cell(r, 'start'))); set('arr', parseTime(cell(r, 'end')));
+      set('carrier', val(cell(r, 'carrier'))); set('booking', val(cell(r, 'booking'))); set('duration', val(cell(r, 'duration'))); set('notes', val(cell(r, 'notes')));
+      const f = val(cell(r, 'from')), t = val(cell(r, 'to'));
+      if (f && f !== endName(data, l.from)) l.from = resolve(f); else if (!f) delete l.from;
+      if (t && t !== endName(data, l.to)) l.to = resolve(t); else if (!t) delete l.to;
+      data.legs[id] = l; seen.add(id); exists ? updated++ : added++;
+    }
+    // rows removed in Excel are removed from the app (activities, restaurants, hotels, transport)
+    let removed = 0;
+    for (const [id, p] of Object.entries(data.places)) if ((p.type === 'activity' || p.type === 'restaurant' || p.type === 'hotel') && !seen.has(id)) { delete data.places[id]; removed++; }
+    for (const id of Object.keys(data.legs)) if (!seen.has(id)) { delete data.legs[id]; removed++; }
+    log.added = added; log.updated = updated; log.removed = removed;
+    // transport hints + todo
+    const ts = findSheet('Transport');
+    if (ts) meta.transportHints = sheetRows(X, wb.Sheets[ts]).slice(1).filter((r) => val(r[0])).map((r) => ({ route: val(r[0]), hint: val(r[1]) }));
+    const td = findSheet('Todo');
+    if (td) meta.todo = sheetRows(X, wb.Sheets[td]).slice(1).filter((r) => val(r[0])).map((r) => ({ t: val(r[0]), done: /^(ja|x|v|gedaan|true|1)/i.test(String(r[1] ?? '').trim()) }));
+    // place new items on the map
+    let geo = 0;
+    for (const [id, p] of Object.entries(data.places)) {
+      if (!p._geo) continue; const q = p._geo; delete p._geo;
+      if (typeof p.lat === 'number') continue;
+      try { const g = geocode ? await geocode(q) : null; if (g) { p.lat = Math.round(g.lat * 1e5) / 1e5; p.lng = Math.round(g.lng * 1e5) / 1e5; geo++; } } catch (_) {}
+      data.places[id] = p;
+    }
+    log.geocoded = geo;
+    return data;
+  }
+
   // ---------- export ----------
   function buildWorkbook(X, data) {
     const meta = (data.trip && data.trip.meta) || {};
@@ -1286,7 +1485,7 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
     const legs = Object.values(data.legs || {});
     // chosen hotel; else the single proposal; several proposals or a placeholder -> "Nog te boeken"
     const hotelFor = (n) => { const hs = hotels.filter(([, h]) => n >= (h.from ?? 0) && n <= (h.to ?? 0)).map(([, h]) => h); const ch = hs.find((h) => h.chosen); if (ch) return ch; const real = hs.filter((h) => !nogTeBoeken(h.name)); if (real.length === 1) return real[0]; return hs.length ? { name: 'Nog te boeken' } : null; };
-    const rows = [['Datum', 'Dag', 'Locatie', 'Hotel', '', 'Programma', 'Vervoer', 'Reistijd', 'Boeking/Suggestie']];
+    const rows = [['Datum', 'Dag', 'Locatie', 'Hotel', '', 'Programma', 'Vervoer', 'Reistijd', 'Boeking/Suggestie', 'Notities']];
     const last = days.length ? days[days.length - 1].n : 0;
     for (const d of days) {
       const dt = meta.startDate ? dateFor(meta.startDate, d.n) : null;
@@ -1295,24 +1494,14 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
       if (h) { if (nogTeBoeken(h.name) || /^hotel .*\(nog te boeken\)$/i.test(h.name)) hName = 'Nog te boeken'; else { hName = h.name; status = h.chosen ? 'bevestigd' : 'nog niet bevestigd'; } }
       const dl = legs.filter((l) => l.day === d.n).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       const derived = [...new Set(dl.map((l) => MODE_TXT[l.mode] || 'Taxi'))].join('+');
-      rows.push([dt ? fmtDate(dt) : '', dt ? WEEKDAYS[dt.getDay()] : '', d.location || '', hName, status, d.title || '', d.transport || derived || '-', d.traveltime || '-', d.bookingHint || '-']);
+      rows.push([dt ? fmtDate(dt) : '', dt ? WEEKDAYS[dt.getDay()] : '', d.location || '', hName, status, d.title || '', d.transport || derived || '-', d.traveltime || '-', d.bookingHint || '-', d.notes || '']);
     }
-    const sheets = [['Reisoverzicht', rows, [28, 13, 13, 13, 13, 13, 13, 13, 13]]];
-    // region sheets
-    const dayLoc = Object.fromEntries(days.map((d) => [d.n, d.location || '']));
-    const regions = new Map();
-    const add = (region, row) => { if (!regions.has(region)) regions.set(region, []); regions.get(region).push(row); };
-    for (const [, h] of hotels) if (h.region) add(h.region, { name: h.name, hint: h.url || h.booking || '', day: '', time: '', kind: 'Hotel', status: h.chosen ? 'bevestigd' : 'voorstel', desc: '', sort: h.from || 0 });
-    for (const [, a] of places.filter(([, p]) => p.type === 'activity' || p.type === 'restaurant').sort((x, y) => (x[1].day || 99) - (y[1].day || 99) || (x[1].order ?? 0) - (y[1].order ?? 0))) {
-      const region = a.region || dayLoc[a.day] || 'Overig';
-      add(region, { name: a.name, hint: a.url || a.booking || '', day: a.day || '', time: a.time || '', kind: a.type === 'restaurant' ? 'Restaurant' : 'Activiteit', status: a.confirmed === false ? 'voorstel' : 'bevestigd', desc: a.desc || '', sort: a.day || 99 });
-    }
-    for (const [region, list] of [...regions].sort((x, y) => Math.min(...x[1].map((r) => r.sort)) - Math.min(...y[1].map((r) => r.sort)))) {
-      list.sort((a, b) => a.sort - b.sort);
-      const r = [['Activiteit', 'Boekingssuggestie', 'Dag', 'Tijd', 'Soort', 'Status', 'Omschrijving']];
-      list.forEach((x) => r.push([x.name, x.hint, x.day, x.time, x.kind, x.status, x.desc]));
-      sheets.push([region.slice(0, 31).replace(/[\\/?*[\]:]/g, ' '), r, [40, 70, 6, 12, 12, 12, 60]]);
-    }
+    const sheets = [['Reisoverzicht', rows, [12, 11, 22, 28, 16, 36, 20, 12, 24, 50]]];
+    sheets.push(['Planning', planningRows(data, meta), PLAN_W]);
+    const pts = [['Naam', 'Soort', 'Code', 'Breedtegraad', 'Lengtegraad', 'Notities', 'ID (niet wijzigen)']];
+    places.filter(([, p]) => p.type === 'point').sort((x, y) => x[1].name.localeCompare(y[1].name)).forEach(([id, p]) => pts.push([p.name || '', PTKIND_TXT[p.kind] || 'Overig', p.code || '', num(p.lat), num(p.lng), p.notes || '', id]));
+    sheets.push(['Plaatsen', pts, [34, 14, 8, 13, 13, 40, 22]]);
+    sheets.push(['Reis', [['Veld', 'Waarde'], ['Naam', meta.title || ''], ['Land', meta.country || ''], ['Reizigers', meta.travelers || ''], ['Startdatum', meta.startDate ? fmtDate(new Date(meta.startDate + 'T12:00:00')) : ''], ['Notities', meta.notes || '']], [16, 80]]);
     // transport
     const tr = [['Traject', 'Suggestie']];
     if (Array.isArray(meta.transportHints) && meta.transportHints.length) meta.transportHints.forEach((t) => tr.push([t.route || '', t.hint || '']));
@@ -1454,7 +1643,7 @@ a.lnk { color: var(--hotel); font-weight: 600; text-decoration: underline; text-
 
   window.TRIP_EXCEL = {
     async exportFile(data) { const X = await loadX(); const wb = buildWorkbook(X, data); const out = X.write(wb, { bookType: 'xlsx', type: 'array' }); return new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }); },
-    async importFile(file, data, geocode) { const X = await loadX(); const wb = X.read(await file.arrayBuffer(), { type: 'array', cellDates: true }); const log = {}; const merged = await mergeWorkbook(X, wb, data, geocode, log); return { data: merged, log }; },
+    async importFile(file, data, geocode) { const X = await loadX(); const wb = X.read(await file.arrayBuffer(), { type: 'array', cellDates: true }); const log = {}; const full = wb.SheetNames.some((n) => norm(n) === 'planning'); log.full = full; const merged = full ? await mergeFull(X, wb, data, geocode, log) : await mergeWorkbook(X, wb, data, geocode, log); return { data: merged, log }; },
   };
 })();
 </script>
@@ -1527,6 +1716,7 @@ const MODES = {
   minivan: { label: 'Minivan', kind: 'road', icon: 'van' },
   bus: { label: 'Bus', kind: 'road', icon: 'bus' },
   auto: { label: 'Huurauto', kind: 'road', icon: 'car' },
+  tuktuk: { label: 'Tuktuk', kind: 'road', icon: 'car' },
   trein: { label: 'Trein', kind: 'rail', icon: 'train' },
   boot: { label: 'Boot', kind: 'boat', icon: 'boat' },
   longtail: { label: 'Longtailboot', kind: 'boat', icon: 'boat' },
@@ -1706,7 +1896,16 @@ const urlLabel = (u) => isMapsUrl(u) ? 'Open in Google Maps' : u.replace(/^https
 // escape text and turn every web address in it into a tappable link
 const linkify = (t) => { const str = String(t ?? ''); let out = '', last = 0; for (const m of str.matchAll(URL_RE)) { let u = m[0].replace(/[).,;!?]+$/, ''); out += esc(str.slice(last, m.index)) + `<a class="lnk" href="${esc(u)}" target="_blank" rel="noopener">${esc(urlLabel(u))}</a>`; last = m.index + u.length; } return out + esc(str.slice(last)); };
 const mapsUrlOf = (p) => { if (p.maps && /^https?:\/\//i.test(p.maps)) return p.maps; for (const f of [p.url, p.desc, p.notes, p.address]) { for (const m of String(f || '').matchAll(URL_RE)) if (isMapsUrl(m[0])) return m[0]; } return null; };
-const gmaps = (p) => mapsUrlOf(p) || `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
+// Google Maps: own link if given; otherwise let Google search by name + place (more reliable than estimated coordinates)
+const placeOf = (p) => { if (p.type === 'hotel') return String(p.stayName || '').replace(/\s*\(.*?\)\s*/g, ' ').trim(); const d = p.day && dayDoc(p.day); return p.region || (d && d[1].location) || ''; };
+const gmaps = (p) => {
+  const own = mapsUrlOf(p); if (own) return own;
+  const placeholder = /nog te boeken/i.test(p.name || '');
+  const name = placeholder ? '' : String(p.name || '').replace(/\s*\((?!nog)[^)]*\)\s*/g, (m) => m).trim();
+  const q = [name, placeOf(p), 'Thailand'].filter(Boolean).filter((x, i, a) => a.findIndex((y) => y.toLowerCase() === x.toLowerCase()) === i).join(', ');
+  if (name || placeholder) return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
+  return `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
+};
 function kv(rows) { const r = rows.filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== ''); return r.length ? `<dl class="kv">${r.map(([k, v, free]) => `<dt>${esc(k)}</dt><dd class="${free ? 'free' : ''}">${v && v.__html ? v.__html : esc(v)}</dd>`).join('')}</dl>` : ''; }
 const link = (u) => u ? { __html: `<a href="${esc(/^https?:\/\//.test(u) ? u : 'https://' + u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '').slice(0, 40))}</a>` } : '';
 function popActs(btns) { return `<div class="acts">${btns.join('')}</div>`; }
@@ -1732,7 +1931,7 @@ function actPopup(id) {
   if (canEdit()) { btns.push(`<button class="btn sm" data-act="edit" data-kind="${a.type}" data-id="${id}" type="button">${ic('edit')}Bewerken</button>`); if (!isConf(a)) btns.push(`<button class="btn sm primary" data-act="confirm" data-id="${id}" type="button">${ic('check')}Bevestigen</button>`); }
   if (a.day) btns.push(`<button class="btn sm" data-act="day" data-n="${a.day}" type="button">Naar dag ${a.day}</button>`);
   if (hasLL(a) || mapsUrlOf(a)) btns.push(`<a class="btn sm" href="${esc(gmaps(a))}" target="_blank" rel="noopener">${ic('map')}Google Maps</a>`);
-  return `<div class="pop"><div class="head"><span class="ico ${K.cls}">${ic(K.icon)}</span><div><div class="name">${esc(a.name)}</div><div class="meta">${esc([K.label, a.day ? dayLabel(a.day) : '', a.time].filter(Boolean).join(' · '))}</div></div></div>
+  return `<div class="pop"><div class="head"><span class="ico ${K.cls}">${ic(K.icon)}</span><div><div class="name">${esc(a.name)}</div><div class="meta">${esc([K.label, a.day ? dayLabel(a.day) : '', [a.time, a.endTime].filter(Boolean).join('–')].filter(Boolean).join(' · '))}</div></div></div>
   ${isConf(a) ? '' : '<div><span class="badge">Voorstel</span></div>'}${a.cuisine ? `<div class="meta">${esc(a.cuisine)}</div>` : ''}${a.desc ? `<div class="desc">${linkify(a.desc)}</div>` : ''}
   ${kv([['Adres', a.address, 1], ['Telefoon', a.phone], ['Prijs', a.price, 1], [a.type === 'restaurant' ? 'Reservering' : 'Ticket', a.booking], ['Website', link(a.url)]])}
   ${a.notes ? `<div class="notes">${linkify(a.notes)}</div>` : ''}${popActs(btns)}</div>`;
@@ -1854,7 +2053,7 @@ function renderDay(n) {
     const K = KIND[a.type]; const prop = !isConf(a);
     const acts = (prop && ce ? `<button class="btn sm" type="button" data-act="confirm" data-id="${id}" title="Bevestigen">${ic('check')}<span class="hide-sm">Bevestig</span></button>` : '') + editBtn(a.type, id, K.label);
     const meta = [a.cuisine, !hasLL(a) ? 'geen vaste plek op de kaart' : '', a.booking ? (a.type === 'restaurant' ? 'reservering ' : 'ticket ') + a.booking : ''].filter(Boolean).join(' · ');
-    items.push({ key: tkey(a.time, a.type === 'restaurant' ? 19 : 13) + 0.0001 * (a.order || 0) + k * 0.00001, html: agRow({ time: a.time, cls: K.cls, icon: K.icon, kindLabel: K.label, title: esc(a.name), meta, desc: a.desc, id, proposal: prop, actions: acts }) });
+    items.push({ key: tkey(a.time, a.type === 'restaurant' ? 19 : 13) + 0.0001 * (a.order || 0) + k * 0.00001, html: agRow({ time: [a.time, a.endTime].filter(Boolean).join('–'), cls: K.cls, icon: K.icon, kindLabel: K.label, title: esc(a.name), meta, desc: a.desc, id, proposal: prop, actions: acts }) });
   });
   items.sort((a, b) => a.key - b.key);
   // overnight
@@ -2000,14 +2199,14 @@ function openEditor(kind, id, preset = {}, keepStack = false) {
       + F.text('url', 'Website', d.url, { type: 'url', ph: 'https://' }) + F.text('maps', 'Google Maps-link', d.maps, { type: 'url', ph: 'https://maps.app.goo.gl/…', hint: 'Plak hier de deellink uit Google Maps; de knop Google Maps opent dan precies deze plek.' }) + F.area('notes', 'Notities', d.notes);
   } else if (kind === 'activity') {
     h = F.text('name', 'Naam activiteit', d.name, { ph: 'bv. Zipline Flight of the Gibbon' })
-      + `<div class="grid2">${F.sel('day', 'Dag', d.day ?? '', dayOpts(true))}${F.text('time', 'Tijd', d.time, { ph: 'bv. 09:00 of ochtend' })}</div>`
+      + `<div class="grid2">${F.sel('day', 'Dag', d.day ?? '', dayOpts(true))}<div class="grid2">${F.text('time', 'Begintijd', d.time, { ph: 'bv. 09:00' })}${F.text('endTime', 'Eindtijd', d.endTime, { ph: 'bv. 12:00' })}</div></div>`
       + F.check('confirmed', 'Bevestigd (op de kaart). Uitgevinkt is het een voorstel.', d.confirmed !== false)
       + F.area('desc', 'Omschrijving', d.desc) + locBox(d)
       + F.text('address', 'Adres / ophaalplek', d.address) + `<div class="grid2">${F.text('price', 'Prijs', d.price)}${F.text('booking', 'Ticket / boeking', d.booking)}</div>`
       + F.text('url', 'Website', d.url, { type: 'url', ph: 'https://' }) + F.text('maps', 'Google Maps-link', d.maps, { type: 'url', ph: 'https://maps.app.goo.gl/…' }) + F.area('notes', 'Notities', d.notes);
   } else if (kind === 'restaurant') {
     h = F.text('name', 'Naam restaurant', d.name, { ph: 'bv. Jay Fai' })
-      + `<div class="grid2">${F.sel('day', 'Dag', d.day ?? '', dayOpts(true))}${F.text('time', 'Tijd', d.time, { ph: 'bv. 19:30, lunch of diner' })}</div>`
+      + `<div class="grid2">${F.sel('day', 'Dag', d.day ?? '', dayOpts(true))}<div class="grid2">${F.text('time', 'Begintijd', d.time, { ph: 'bv. 19:30' })}${F.text('endTime', 'Eindtijd', d.endTime, { ph: 'bv. 21:00' })}</div></div>`
       + F.check('confirmed', 'Bevestigd (op de kaart). Uitgevinkt is het een voorstel.', d.confirmed !== false)
       + F.text('cuisine', 'Keuken', d.cuisine, { ph: 'bv. Thais streetfood, seafood' })
       + F.area('desc', 'Omschrijving / wat bestellen', d.desc) + locBox(d)
@@ -2204,7 +2403,7 @@ if (innerWidth <= 820) $('#legend').open = false;
   let xlFileSel=null;
   $('#xlFile').addEventListener('change',(e)=>{
     xlFileSel=e.target.files[0]; e.target.value=''; if(!xlFileSel) return;
-    $('#xlText').textContent='"'+xlFileSel.name+'" past je reis aan volgens het Excel-bestand: dagen, datums, plaatsen en hotels uit het Reisoverzicht, en activiteiten uit de andere tabbladen. Wat niet in Excel staat (zoals coördinaten, notities, vervoer en restaurants) blijft behouden. Tip: maak eerst een back-up.';
+    $('#xlText').textContent='"'+xlFileSel.name+'" past je reis aan volgens het Excel-bestand. Bij een bestand dat uit deze app komt (met tabblad Planning) wordt alles overgenomen: gewijzigde regels worden bijgewerkt, nieuwe regels toegevoegd en regels die je hebt verwijderd verdwijnen ook uit de app. Tip: maak eerst een back-up.';
     $('#xlBusy').hidden=true; $('#xlGo').disabled=false; $('#xlConfirm').hidden=false;
   });
   $('#xlCancel').addEventListener('click',()=>{ $('#xlConfirm').hidden=true; xlFileSel=null; });
@@ -2215,7 +2414,7 @@ if (innerWidth <= 820) $('#legend').open = false;
       const {data,log}=await window.TRIP_EXCEL.importFile(xlFileSel,cur,window.STANDALONE_GEOCODE);
       await window.TRIP_STORE.setData(data);
       $('#xlConfirm').hidden=true;
-      toast(`Geïmporteerd: ${log.days} dagen, ${log.hotelsAdded+log.hotelsUpdated} hotels, ${log.actsAdded+log.actsUpdated} activiteiten`);
+      toast(log.full ? `Geïmporteerd: ${log.added} nieuw, ${log.updated} bijgewerkt, ${log.removed} verwijderd` : `Geïmporteerd: ${log.days} dagen, ${log.hotelsAdded+log.hotelsUpdated} hotels, ${log.actsAdded+log.actsUpdated} activiteiten`);
     }catch(e){ $('#xlBusy').hidden=true; $('#xlGo').disabled=false; $('#xlText').textContent='Importeren lukte niet: '+(e.message||e); }
     xlFileSel=null;
   });
